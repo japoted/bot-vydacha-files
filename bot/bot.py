@@ -1911,26 +1911,23 @@ def main():
     if jq is not None:
         jq.run_repeating(check_members, interval=60, first=10)
         jq.run_repeating(lambda ctx: FLOOD.cleanup(), interval=300, first=60)
+    else:
+        async def _fallback_scheduler():
+            while True:
+                try:
+                    await check_members(_types.SimpleNamespace(bot=app.bot))
+                except Exception as e:
+                    logging.warning(f"scheduler check_members: {e}")
+                FLOOD.cleanup()
+                await asyncio.sleep(60)
+
+        async def _post_init(application):
+            application.create_task(_fallback_scheduler())
+
+        app.post_init = _post_init
 
     print("Bot started!")
-
-    if jq is not None:
-        app.run_polling()
-        return
-
-    async def _fallback_scheduler():
-        while True:
-            try:
-                await check_members(_types.SimpleNamespace(bot=app.bot))
-            except Exception as e:
-                logging.warning(f"scheduler check_members: {e}")
-            FLOOD.cleanup()
-            await asyncio.sleep(60)
-
-    app.initialize()
-    app.start()
-    asyncio.create_task(_fallback_scheduler())
-    app.idle()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
