@@ -4,7 +4,7 @@ import sqlite3
 import logging
 import hashlib
 import time
-from dotenv import load_dotenv
+import types as _types
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     ReplyKeyboardMarkup, LabeledPrice,
@@ -16,7 +16,25 @@ from telegram.ext import (
     PreCheckoutQueryHandler, JobQueue
 )
 
-load_dotenv()
+def _load_dotenv():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        return
+    except ImportError:
+        pass
+    try:
+        with open(".env", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip())
+    except OSError:
+        pass
+
+_load_dotenv()
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -1889,11 +1907,30 @@ def main():
     app.add_handler(ChatMemberHandler(track_member, ChatMemberHandler.CHAT_MEMBER), group=1)
     app.add_handler(ChatJoinRequestHandler(auto_approve), group=1)
 
-    app.job_queue.run_repeating(check_members, interval=60, first=10)
-    app.job_queue.run_repeating(lambda ctx: FLOOD.cleanup(), interval=300, first=60)
+    jq = app.job_queue
+    if jq is not None:
+        jq.run_repeating(check_members, interval=60, first=10)
+        jq.run_repeating(lambda ctx: FLOOD.cleanup(), interval=300, first=60)
 
     print("Bot started!")
-    app.run_polling()
+
+    if jq is not None:
+        app.run_polling()
+        return
+
+    async def _fallback_scheduler():
+        while True:
+            try:
+                await check_members(_types.SimpleNamespace(bot=app.bot))
+            except Exception as e:
+                logging.warning(f"scheduler check_members: {e}")
+            FLOOD.cleanup()
+            await asyncio.sleep(60)
+
+    app.initialize()
+    app.start()
+    asyncio.create_task(_fallback_scheduler())
+    app.idle()
 
 if __name__ == "__main__":
     main()
